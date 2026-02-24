@@ -1,4 +1,4 @@
-xlwings
+openpyxl
 qstock
-pyfolio>=0.10.0
+# pyfolio>=0.10.0
 backtrader

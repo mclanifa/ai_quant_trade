@@ -21,11 +21,12 @@
 import os
 import time
 import traceback
-from typing import Tuple
+from typing import Tuple, Dict, Any
 
-import xlwings as xw
 import pandas as pd
 import qstock as qs
+from openpyxl import load_workbook
+from openpyxl.utils import get_column_letter
 
 import logging
 
@@ -39,10 +40,12 @@ class StockMonitor:
                  ):
         # 1. open monitor xlsx file
         if not os.path.exists(monitor_xlsx_file):
-            logging.info('文件路径错误或不存在：' + monitor_xlsx_file)
+            logging.error('文件路径错误或不存在：' + monitor_xlsx_file)
+            raise FileNotFoundError(f'{monitor_xlsx_file} 不存在')
 
-        self.wb = xw.Book(monitor_xlsx_file)
-        self.sht_num = len(self.wb.sheets)
+        self.monitor_xlsx_file = monitor_xlsx_file
+        self.wb = load_workbook(monitor_xlsx_file)
+        self.sht_num = len(self.wb.sheetnames)
 
         # 2. open stock info xlsx file
         self.use_online_data = False   # if True, use qstock returned dataframe
@@ -77,6 +80,30 @@ class StockMonitor:
             stock_lst = [code.split('.')[0] for code in stock_lst]
         return stock_lst
 
+    def _save_df_to_sheet(self, sheet, sheet_name: str, df: pd.DataFrame):
+        """
+        Save DataFrame to Excel sheet
+        """
+        if df.empty:
+            return
+        
+        # Clear existing content
+        for row in sheet.iter_rows():
+            for cell in row:
+                cell.value = None
+        
+        # Write headers
+        for col_idx, col_name in enumerate(df.columns, 1):
+            sheet.cell(row=1, column=col_idx, value=col_name)
+        
+        # Write data rows
+        for row_idx, row in enumerate(df.values, 2):
+            for col_idx, value in enumerate(row, 1):
+                sheet.cell(row=row_idx, column=col_idx, value=value)
+        
+        # Save workbook
+        self.wb.save(self.monitor_xlsx_file)
+
     def sheet_2_df(self, index: int):
         """
         excel sheet to dataframe
@@ -84,18 +111,14 @@ class StockMonitor:
         :return:
         """
         # loading sheet and get basic info
-        sheet = self.wb.sheets[index]
-        # log.info('Processing: ' + sheet.name)
-
-        row_num = sheet.api.UsedRange.Rows.count
-        col_num = sheet.api.UsedRange.Columns.count
-        if row_num == 1 and col_num == 1:
-            df_sht = pd.DataFrame()
-        else:
-            # convert sheet to dataframe
-            # todo: headers and index, consider as a set option
-            df_sht = sheet.range((1, 1), (row_num, col_num)). \
-                options(pd.DataFrame, headers=True, index=False).value
+        sheet_name = self.wb.sheetnames[index]
+        sheet = self.wb[sheet_name]
+        
+        # Read data from sheet using pandas
+        df_sht = pd.read_excel(self.monitor_xlsx_file, sheet_name=sheet_name)
+        
+        row_num = len(df_sht) + 1  # +1 for header
+        col_num = len(df_sht.columns) if not df_sht.empty else 0
 
         return sheet, df_sht, row_num, col_num
 
@@ -104,10 +127,12 @@ class StockMonitor:
         print('初始化信息加载。。。')
         for i in range(self.sht_num):
             sheet, df_sht, row_num, col_num = self.sheet_2_df(i)
-            if df_sht.empty and 'sheet' in sheet.name.lower():
+            sheet_name = self.wb.sheetnames[i]
+            
+            if df_sht.empty and 'sheet' in sheet_name.lower():
                 continue
 
-            if '自选股' in sheet.name and not self.use_online_data:
+            if '自选股' in sheet_name and not self.use_online_data:
                 stock_lst = self.get_stock_lst(df_sht, remove_postfix=False)
                 if not len(stock_lst):
                     continue
@@ -116,26 +141,25 @@ class StockMonitor:
                 df_tmp = pd.DataFrame(columns=self.df_stock.columns)
                 for code in stock_lst:
                     df_row = self.df_stock[self.df_stock['证券代码'] == code]
-                    df_tmp = df_tmp.append(df_row, ignore_index=True)
-                    pass
+                    df_tmp = pd.concat([df_tmp, df_row], ignore_index=True)
 
                 # put info into sheet table
                 for col in df_tmp.columns:
                     if col in df_sht.columns:
                         df_sht[col] = df_tmp[col]
 
-            # update to excel online
-            sheet.range((1, 1), (row_num, col_num)).value = df_sht
+            # save dataframe back to excel
+            self._save_df_to_sheet(sheet, sheet_name, df_sht)
 
             self._wb_dict[i] = {'sheet': sheet, 'df_sht': df_sht,
-                                'row_num': row_num, 'col_num': col_num}
+                                'row_num': row_num, 'col_num': col_num, 'sheet_name': sheet_name}
 
     def query_rt_info(self):
-        for val in self._wb_dict.values():
-            sheet, df_sht, row_num, col_num = val.values()
+        for i, val in enumerate(self._wb_dict.values()):
+            sheet, df_sht, row_num, col_num, sheet_name = val.values()
 
-            if '自选股' in sheet.name:
-                print('加载自选股数据：', sheet.name)
+            if '自选股' in sheet_name:
+                print('加载自选股数据：', sheet_name)
                 # get stock real time data
                 stock_lst = self.get_stock_lst(df_sht, remove_postfix=True)
                 if not len(stock_lst):
@@ -149,84 +173,69 @@ class StockMonitor:
                     traceback.print_exc()
                     df_rt = pd.DataFrame()
 
-                # 2. 获取交易日实时盘口异动数据，相当于盯盘小精灵
-                # df_chg = qs.realtime_change()
-
-                # 使用新闻统一接口，无数据会报错
-                # df_stock_news = qs.stock_news('天瑞仪器')
-
                 # store data in dataframe
                 if not df_rt.empty:
                     if not self.use_online_data:
                         df_sht['现价(元)'] = df_rt['最新']
                         df_sht['涨跌幅'] = df_rt['涨幅']
                         df_sht['刷新时间'] = df_rt['时间']
-                        # inplace: 原地修改
-                        # df_sht.sort_values(by="涨跌幅", inplace=True, ascending=False)
                     else:
                         df_sht = df_rt
 
-                    # update to excel online
-                    # if not df_sht.empty:
-                    sheet.range((1, 1), df_sht.shape).value = df_sht
+                    # update to excel
+                    self._save_df_to_sheet(sheet, sheet_name, df_sht)
 
-            if '概念涨幅榜' in sheet.name:
-                print('加载概念涨幅榜数据：', sheet.name)
+            if '概念涨幅榜' in sheet_name:
+                print('加载概念涨幅榜数据：', sheet_name)
                 try:
-                    df_concept = qs.realtime_data('概念板块')  # 获取概念板块最新行情指标: 来源东方财富
+                    df_concept = qs.realtime_data('概念板块')
                     if not df_concept.empty:
-                        sheet.range((1, 1), df_concept.shape).value = df_concept
+                        self._save_df_to_sheet(sheet, sheet_name, df_concept)
                 except Exception as e:
                     logging.error('Caught exception in realtime concept Data Acquisition %s' % e)
                     traceback.print_exc()
 
-            if '龙虎榜' in sheet.name:
-                print('加载龙虎榜数据：', sheet.name)
+            if '龙虎榜' in sheet_name:
+                print('加载龙虎榜数据：', sheet_name)
                 try:
-                    df_head = qs.stock_billboard()  # 获取龙虎榜最新行情指标: 来源东方财富
+                    df_head = qs.stock_billboard()
                     if not df_head.empty:
-                        sheet.range((1, 1), df_head.shape).value = df_head
+                        self._save_df_to_sheet(sheet, sheet_name, df_head)
                 except Exception as e:
                     logging.error('Caught exception in billboard Data Acquisition %s' % e)
                     traceback.print_exc()
-                    continue
 
-            if '财联社新闻' in sheet.name:
-                print('加载财联社新闻：', sheet.name)
+            if '财联社新闻' in sheet_name:
+                print('加载财联社新闻：', sheet_name)
                 try:
-                    df_news = qs.news_data()  # 获取财联社新闻
+                    df_news = qs.news_data()
                     df_news['发布时间'] = df_news['发布时间'].apply(str)
                     df_news['发布日期'] = df_news['发布日期'].apply(str)
                     if not df_news.empty:
-                        sheet.range((1, 1), df_news.shape).value = df_news
+                        self._save_df_to_sheet(sheet, sheet_name, df_news)
                 except Exception as e:
                     logging.error('Caught exception in Finance News Acquisition %s' % e)
                     traceback.print_exc()
-                    continue
 
-            if '市场快讯' in sheet.name:
-                print('加载市场快讯：', sheet.name)
+            if '市场快讯' in sheet_name:
+                print('加载市场快讯：', sheet_name)
                 try:
-                    df_js = qs.news_data('js')  # 获取市场快讯
+                    df_js = qs.news_data('js')
                     if not df_js.empty:
-                        sheet.range((1, 1), df_js.shape).value = df_js
+                        self._save_df_to_sheet(sheet, sheet_name, df_js)
                 except Exception as e:
                     logging.error('Caught exception in Market Express Acquisition %s' % e)
                     traceback.print_exc()
-                    continue
 
-            if '涨停板' in sheet.name:
-                print('加载涨停板：', sheet.name)
+            if '涨停板' in sheet_name:
+                print('加载涨停板：', sheet_name)
                 try:
                     df_zt = qs.stock_zt_pool()
                     if not df_zt.empty:
-                        sheet.range((1, 1), df_zt.shape).value = df_zt
+                        self._save_df_to_sheet(sheet, sheet_name, df_zt)
                 except Exception as e:
-                    logging.error('Caught exception in Market Express Acquisition %s' % e)
+                    logging.error('Caught exception in stock_zt_pool Acquisition %s' % e)
                     traceback.print_exc()
-                    continue
-
-            pass
 
     def real_time_update(self):
         self.query_static_info()
