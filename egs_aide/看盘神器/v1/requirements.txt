@@ -1,2 +1,4 @@
 xlwings
 qstock
+pyfolio>=0.10.0
+backtrader

@@ -48,3 +48,5 @@ mlruns
 **/*build*
 ly_*
 log
+
+.venv/*/
