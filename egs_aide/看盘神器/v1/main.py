@@ -186,13 +186,20 @@ class StockMonitor:
                 # store data in dataframe
                 if not df_rt.empty:
                     if not self.use_online_data:
-                        df_sht['现价(元)'] = df_rt['最新']
-                        df_sht['涨跌幅'] = df_rt['涨幅']
-                        df_sht['刷新时间'] = df_rt['时间']
+                        rt_col_map = {
+                            '现价(元)': '最新',
+                            '涨跌幅': '涨幅',
+                            '刷新时间': '时间',
+                        }
+                        for target_col, src_col in rt_col_map.items():
+                            if target_col in df_sht.columns and src_col in df_rt.columns:
+                                df_sht[target_col] = df_rt[src_col].tolist()
                         # inplace: 原地修改
                         # df_sht.sort_values(by="涨跌幅", inplace=True, ascending=False)
                     else:
-                        df_sht = df_rt
+                        common_cols = [col for col in df_sht.columns if col in df_rt.columns]
+                        for col in common_cols:
+                            df_sht[col] = df_rt[col].tolist()
 
                     # update to excel online
                     # if not df_sht.empty:
