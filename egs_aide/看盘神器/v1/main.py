@@ -72,9 +72,28 @@ class StockMonitor:
     # ========= Funcs ===========
     @staticmethod
     def get_stock_lst(df_sht: pd.DataFrame, remove_postfix: bool = False) -> list:
-        stock_lst = df_sht['代码'].tolist()
-        if remove_postfix:
-            stock_lst = [code.split('.')[0] for code in stock_lst]
+        stock_raw_lst = df_sht['代码'].tolist()
+        stock_lst = []
+        for code in stock_raw_lst:
+            if pd.isna(code):
+                continue
+
+            if isinstance(code, (int, float)):
+                if isinstance(code, float) and code.is_integer():
+                    code_str = str(int(code))
+                else:
+                    code_str = str(code)
+            else:
+                code_str = str(code).strip()
+
+            if not code_str or code_str.lower() in ['nan', 'none']:
+                continue
+
+            if remove_postfix:
+                code_str = code_str.split('.')[0]
+
+            stock_lst.append(code_str)
+
         return stock_lst
 
     def sheet_2_df(self, index: int):
@@ -87,8 +106,13 @@ class StockMonitor:
         sheet = self.wb.sheets[index]
         # log.info('Processing: ' + sheet.name)
 
-        row_num = sheet.api.UsedRange.Rows.count
-        col_num = sheet.api.UsedRange.Columns.count
+        # NOTE:
+        # - On Windows (pywin32), `sheet.api.UsedRange` is available.
+        # - On macOS (appscript), the same attribute access may fail.
+        # Use xlwings' cross-platform abstraction instead.
+        used_range = sheet.used_range
+        row_num = used_range.last_cell.row
+        col_num = used_range.last_cell.column
         if row_num == 1 and col_num == 1:
             df_sht = pd.DataFrame()
         else:
@@ -113,11 +137,15 @@ class StockMonitor:
                     continue
 
                 # get stock info from full table
-                df_tmp = pd.DataFrame(columns=self.df_stock.columns)
+                df_rows = []
                 for code in stock_lst:
                     df_row = self.df_stock[self.df_stock['证券代码'] == code]
-                    df_tmp = df_tmp.append(df_row, ignore_index=True)
-                    pass
+                    df_rows.append(df_row)
+
+                if df_rows:
+                    df_tmp = pd.concat(df_rows, ignore_index=True)
+                else:
+                    df_tmp = pd.DataFrame(columns=self.df_stock.columns)
 
                 # put info into sheet table
                 for col in df_tmp.columns:
