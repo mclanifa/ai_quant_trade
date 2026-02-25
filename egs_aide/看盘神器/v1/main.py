@@ -19,6 +19,7 @@
 # limitations under the License.
 
 import os
+import random
 import time
 import traceback
 from typing import Tuple
@@ -68,6 +69,15 @@ class StockMonitor:
         # ===== Internal Variables =======
         self._wb_dict = {}
         self._refresh_wait_time = refresh_wait_time
+        self._api_min_interval = {
+            'watchlist': 3,
+            'concept': 30,
+            'billboard': 60,
+            'news': 20,
+            'zt': 30,
+        }
+        self._api_next_allowed = {k: 0.0 for k in self._api_min_interval}
+        self._api_fail_count = {k: 0 for k in self._api_min_interval}
 
     @staticmethod
     def update_sheet_data_only(sheet, df_sht: pd.DataFrame, row_num: int, col_num: int):
@@ -165,6 +175,25 @@ class StockMonitor:
 
         return df_sorted.reset_index(drop=True)
 
+    def can_request_api(self, api_name: str) -> bool:
+        return time.time() >= self._api_next_allowed.get(api_name, 0.0)
+
+    def mark_api_result(self, api_name: str, success: bool):
+        now = time.time()
+        min_interval = self._api_min_interval.get(api_name, 5)
+
+        if success:
+            self._api_fail_count[api_name] = 0
+            jitter = random.uniform(0, max(min_interval * 0.2, 0.2))
+            self._api_next_allowed[api_name] = now + min_interval + jitter
+        else:
+            fail_count = self._api_fail_count.get(api_name, 0) + 1
+            self._api_fail_count[api_name] = fail_count
+            backoff = min(300, min_interval * (2 ** min(fail_count, 6)))
+            jitter = random.uniform(0, max(backoff * 0.2, 0.5))
+            self._api_next_allowed[api_name] = now + backoff + jitter
+            logging.warning('接口%s触发退避，第%d次失败，%.1f秒后重试', api_name, fail_count, backoff + jitter)
+
     # ========= Funcs ===========
     @staticmethod
     def get_stock_lst(df_sht: pd.DataFrame, remove_postfix: bool = False) -> list:
@@ -259,6 +288,9 @@ class StockMonitor:
             sheet, df_sht, row_num, col_num = val.values()
 
             if '自选股' in sheet.name:
+                if not self.can_request_api('watchlist'):
+                    continue
+
                 print('加载自选股数据：', sheet.name)
                 # get stock real time data
                 stock_lst = self.get_stock_lst(df_sht, remove_postfix=True)
@@ -268,9 +300,11 @@ class StockMonitor:
                 # 1. 获取实时数据，数据来源东方财富
                 try:
                     df_rt = qs.realtime_data(code=stock_lst)  # 获取沪深A股最新行情指标
+                    self.mark_api_result('watchlist', success=True)
                 except Exception as e:
                     logging.error('Caught exception in realtime Data Acquisition %s' % e)
                     traceback.print_exc()
+                    self.mark_api_result('watchlist', success=False)
                     df_rt = pd.DataFrame()
 
                 # 2. 获取交易日实时盘口异动数据，相当于盯盘小精灵
@@ -296,34 +330,48 @@ class StockMonitor:
                     # update to excel online
                     self.update_sheet_data_only(sheet, df_sht, row_num, col_num)
 
-            # if '概念涨幅榜' in sheet.name:
-            #     print('加载概念涨幅榜数据：', sheet.name)
-            #     try:
-            #         df_concept = qs.realtime_data('概念板块')  # 获取概念板块最新行情指标: 来源东方财富
-            #         if not df_concept.empty:
-            #             # sheet.range((1, 1), df_concept.shape).value = df_concept
-            #             if self.update_df_existing_columns(df_sht, df_concept):
-            #                 self.update_sheet_data_only(sheet, df_sht, row_num, col_num)
-            #     except Exception as e:
-            #         logging.error('Caught exception in realtime concept Data Acquisition %s' % e)
-            #         traceback.print_exc()
+            if '概念涨幅榜' in sheet.name:
+                if not self.can_request_api('concept'):
+                    continue
+
+                print('加载概念涨幅榜数据：', sheet.name)
+                try:
+                    df_concept = qs.realtime_data('概念板块')  # 获取概念板块最新行情指标: 来源东方财富
+                    self.mark_api_result('concept', success=True)
+                    if not df_concept.empty:
+                        # sheet.range((1, 1), df_concept.shape).value = df_concept
+                        if self.update_df_existing_columns(df_sht, df_concept):
+                            self.update_sheet_data_only(sheet, df_sht, row_num, col_num)
+                except Exception as e:
+                    self.mark_api_result('concept', success=False)
+                    logging.error('Caught exception in realtime concept Data Acquisition %s' % e)
+                    continue
 
             if '龙虎榜' in sheet.name:
+                if not self.can_request_api('billboard'):
+                    continue
+
                 print('加载龙虎榜数据：', sheet.name)
                 try:
                     df_head = qs.stock_billboard()  # 获取龙虎榜最新行情指标: 来源东方财富
+                    self.mark_api_result('billboard', success=True)
                     if not df_head.empty:
                         if self.update_df_existing_columns(df_sht, df_head):
                             self.update_sheet_data_only(sheet, df_sht, row_num, col_num)
                 except Exception as e:
+                    self.mark_api_result('billboard', success=False)
                     logging.error('Caught exception in billboard Data Acquisition %s' % e)
                     traceback.print_exc()
                     continue
 
             if '财联社新闻' in sheet.name:
+                if not self.can_request_api('news'):
+                    continue
+
                 print('加载财联社新闻：', sheet.name)
                 try:
                     df_news = qs.news_data()  # 获取财联社新闻
+                    self.mark_api_result('news', success=True)
                     if not df_news.empty:
                         df_news = self.sort_news_by_datetime_desc(df_news)
 
@@ -335,6 +383,7 @@ class StockMonitor:
                         if self.update_df_existing_columns(df_sht, df_news):
                             self.update_sheet_data_only(sheet, df_sht, row_num, col_num)
                 except Exception as e:
+                    self.mark_api_result('news', success=False)
                     logging.error('Caught exception in Finance News Acquisition %s' % e)
                     traceback.print_exc()
                     continue
@@ -351,13 +400,18 @@ class StockMonitor:
             #         continue
 
             if '涨停板' in sheet.name:
+                if not self.can_request_api('zt'):
+                    continue
+
                 print('加载涨停板：', sheet.name)
                 try:
                     df_zt = qs.stock_zt_pool()
+                    self.mark_api_result('zt', success=True)
                     if not df_zt.empty:
                         if self.update_df_existing_columns(df_sht, df_zt):
                             self.update_sheet_data_only(sheet, df_sht, row_num, col_num)
                 except Exception as e:
+                    self.mark_api_result('zt', success=False)
                     logging.error('Caught exception in Market Express Acquisition %s' % e)
                     traceback.print_exc()
                     # continue
