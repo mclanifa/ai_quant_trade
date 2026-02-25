@@ -122,6 +122,49 @@ class StockMonitor:
 
         return updated
 
+    @staticmethod
+    def sort_news_by_datetime_desc(df_news: pd.DataFrame) -> pd.DataFrame:
+        """
+        按新闻日期+时间降序排列（最新在前）。
+        兼容列名：发布日期 + 发布时间/时间。
+        """
+        if df_news is None or df_news.empty:
+            return df_news
+
+        date_col = '发布日期' if '发布日期' in df_news.columns else None
+        time_col = None
+        if '发布时间' in df_news.columns:
+            time_col = '发布时间'
+        elif '时间' in df_news.columns:
+            time_col = '时间'
+
+        if date_col is None and time_col is None:
+            return df_news
+
+        df_sorted = df_news.copy()
+
+        if date_col and time_col:
+            dt_series = pd.to_datetime(
+                df_sorted[date_col].astype(str).str.strip() + ' ' +
+                df_sorted[time_col].astype(str).str.strip(),
+                errors='coerce'
+            )
+            df_sorted['_sort_dt'] = dt_series
+            df_sorted.sort_values(by='_sort_dt', ascending=False, inplace=True)
+            df_sorted.drop(columns=['_sort_dt'], inplace=True)
+        elif date_col:
+            date_series = pd.to_datetime(df_sorted[date_col], errors='coerce')
+            df_sorted['_sort_dt'] = date_series
+            df_sorted.sort_values(by='_sort_dt', ascending=False, inplace=True)
+            df_sorted.drop(columns=['_sort_dt'], inplace=True)
+        else:
+            time_series = pd.to_datetime(df_sorted[time_col].astype(str), errors='coerce')
+            df_sorted['_sort_dt'] = time_series
+            df_sorted.sort_values(by='_sort_dt', ascending=False, inplace=True)
+            df_sorted.drop(columns=['_sort_dt'], inplace=True)
+
+        return df_sorted.reset_index(drop=True)
+
     # ========= Funcs ===========
     @staticmethod
     def get_stock_lst(df_sht: pd.DataFrame, remove_postfix: bool = False) -> list:
@@ -282,6 +325,8 @@ class StockMonitor:
                 try:
                     df_news = qs.news_data()  # 获取财联社新闻
                     if not df_news.empty:
+                        df_news = self.sort_news_by_datetime_desc(df_news)
+
                         if '发布时间' in df_news.columns:
                             df_news['发布时间'] = df_news['发布时间'].apply(str)
                         if '发布日期' in df_news.columns:
