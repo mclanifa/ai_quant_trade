@@ -198,15 +198,15 @@ class StockMonitor:
                     # if not df_sht.empty:
                     sheet.range((1, 1), df_sht.shape).value = df_sht
 
-            if '概念涨幅榜' in sheet.name:
-                print('加载概念涨幅榜数据：', sheet.name)
-                try:
-                    df_concept = qs.realtime_data('概念板块')  # 获取概念板块最新行情指标: 来源东方财富
-                    if not df_concept.empty:
-                        sheet.range((1, 1), df_concept.shape).value = df_concept
-                except Exception as e:
-                    logging.error('Caught exception in realtime concept Data Acquisition %s' % e)
-                    traceback.print_exc()
+            # if '概念涨幅榜' in sheet.name:
+            #     print('加载概念涨幅榜数据：', sheet.name)
+            #     try:
+            #         df_concept = qs.realtime_data('概念板块')  # 获取概念板块最新行情指标: 来源东方财富
+            #         if not df_concept.empty:
+            #             sheet.range((1, 1), df_concept.shape).value = df_concept
+            #     except Exception as e:
+            #         logging.error('Caught exception in realtime concept Data Acquisition %s' % e)
+            #         traceback.print_exc()
 
             if '龙虎榜' in sheet.name:
                 print('加载龙虎榜数据：', sheet.name)
@@ -219,29 +219,29 @@ class StockMonitor:
                     traceback.print_exc()
                     continue
 
-            if '财联社新闻' in sheet.name:
-                print('加载财联社新闻：', sheet.name)
-                try:
-                    df_news = qs.news_data()  # 获取财联社新闻
-                    df_news['发布时间'] = df_news['发布时间'].apply(str)
-                    df_news['发布日期'] = df_news['发布日期'].apply(str)
-                    if not df_news.empty:
-                        sheet.range((1, 1), df_news.shape).value = df_news
-                except Exception as e:
-                    logging.error('Caught exception in Finance News Acquisition %s' % e)
-                    traceback.print_exc()
-                    continue
+            # if '财联社新闻' in sheet.name:
+            #     print('加载财联社新闻：', sheet.name)
+            #     try:
+            #         df_news = qs.news_data()  # 获取财联社新闻
+            #         df_news['发布时间'] = df_news['发布时间'].apply(str)
+            #         df_news['发布日期'] = df_news['发布日期'].apply(str)
+            #         if not df_news.empty:
+            #             sheet.range((1, 1), df_news.shape).value = df_news
+            #     except Exception as e:
+            #         logging.error('Caught exception in Finance News Acquisition %s' % e)
+            #         traceback.print_exc()
+            #         continue
 
-            if '市场快讯' in sheet.name:
-                print('加载市场快讯：', sheet.name)
-                try:
-                    df_js = qs.news_data('js')  # 获取市场快讯
-                    if not df_js.empty:
-                        sheet.range((1, 1), df_js.shape).value = df_js
-                except Exception as e:
-                    logging.error('Caught exception in Market Express Acquisition %s' % e)
-                    traceback.print_exc()
-                    continue
+            # if '市场快讯' in sheet.name:
+            #     print('加载市场快讯：', sheet.name)
+            #     try:
+            #         df_js = qs.news_data('js')  # 获取市场快讯
+            #         if not df_js.empty:
+            #             sheet.range((1, 1), df_js.shape).value = df_js
+            #     except Exception as e:
+            #         logging.error('Caught exception in Market Express Acquisition %s' % e)
+            #         traceback.print_exc()
+            #         continue
 
             if '涨停板' in sheet.name:
                 print('加载涨停板：', sheet.name)
