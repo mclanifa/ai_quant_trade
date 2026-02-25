@@ -90,6 +90,38 @@ class StockMonitor:
         data_values = df_sht.iloc[:write_row_num, :write_col_num].values.tolist()
         sheet.range((2, 1), (write_row_num + 1, write_col_num)).value = data_values
 
+    @staticmethod
+    def update_df_existing_columns(target_df: pd.DataFrame,
+                                   source_df: pd.DataFrame,
+                                   col_map: dict = None) -> bool:
+        """
+        仅更新 target_df 已有列，不新增任何列。
+        :param target_df: 目标表（来自现有 sheet）
+        :param source_df: 数据源表（接口返回）
+        :param col_map: 可选列映射，格式 {target_col: source_col}
+        :return: 是否有列被更新
+        """
+        if target_df is None or source_df is None or target_df.empty or source_df.empty:
+            return False
+
+        target_len = len(target_df)
+        updated = False
+
+        if col_map is None:
+            pairs = [(col, col) for col in target_df.columns if col in source_df.columns]
+        else:
+            pairs = [(t_col, s_col)
+                     for t_col, s_col in col_map.items()
+                     if t_col in target_df.columns and s_col in source_df.columns]
+
+        for target_col, source_col in pairs:
+            src_series = source_df[source_col].reset_index(drop=True)
+            aligned_series = src_series.reindex(range(target_len))
+            target_df[target_col] = aligned_series.values.tolist()
+            updated = True
+
+        return updated
+
     # ========= Funcs ===========
     @staticmethod
     def get_stock_lst(df_sht: pd.DataFrame, remove_postfix: bool = False) -> list:
@@ -212,15 +244,11 @@ class StockMonitor:
                             '涨跌幅': '涨幅',
                             '刷新时间': '时间',
                         }
-                        for target_col, src_col in rt_col_map.items():
-                            if target_col in df_sht.columns and src_col in df_rt.columns:
-                                df_sht[target_col] = df_rt[src_col].tolist()
+                        self.update_df_existing_columns(df_sht, df_rt, rt_col_map)
                         # inplace: 原地修改
                         # df_sht.sort_values(by="涨跌幅", inplace=True, ascending=False)
                     else:
-                        common_cols = [col for col in df_sht.columns if col in df_rt.columns]
-                        for col in common_cols:
-                            df_sht[col] = df_rt[col].tolist()
+                        self.update_df_existing_columns(df_sht, df_rt)
 
                     # update to excel online
                     self.update_sheet_data_only(sheet, df_sht, row_num, col_num)
@@ -230,7 +258,9 @@ class StockMonitor:
             #     try:
             #         df_concept = qs.realtime_data('概念板块')  # 获取概念板块最新行情指标: 来源东方财富
             #         if not df_concept.empty:
-            #             sheet.range((1, 1), df_concept.shape).value = df_concept
+            #             # sheet.range((1, 1), df_concept.shape).value = df_concept
+            #             if self.update_df_existing_columns(df_sht, df_concept):
+            #                 self.update_sheet_data_only(sheet, df_sht, row_num, col_num)
             #     except Exception as e:
             #         logging.error('Caught exception in realtime concept Data Acquisition %s' % e)
             #         traceback.print_exc()
@@ -240,24 +270,29 @@ class StockMonitor:
                 try:
                     df_head = qs.stock_billboard()  # 获取龙虎榜最新行情指标: 来源东方财富
                     if not df_head.empty:
-                        sheet.range((1, 1), df_head.shape).value = df_head
+                        if self.update_df_existing_columns(df_sht, df_head):
+                            self.update_sheet_data_only(sheet, df_sht, row_num, col_num)
                 except Exception as e:
                     logging.error('Caught exception in billboard Data Acquisition %s' % e)
                     traceback.print_exc()
                     continue
 
-            # if '财联社新闻' in sheet.name:
-            #     print('加载财联社新闻：', sheet.name)
-            #     try:
-            #         df_news = qs.news_data()  # 获取财联社新闻
-            #         df_news['发布时间'] = df_news['发布时间'].apply(str)
-            #         df_news['发布日期'] = df_news['发布日期'].apply(str)
-            #         if not df_news.empty:
-            #             sheet.range((1, 1), df_news.shape).value = df_news
-            #     except Exception as e:
-            #         logging.error('Caught exception in Finance News Acquisition %s' % e)
-            #         traceback.print_exc()
-            #         continue
+            if '财联社新闻' in sheet.name:
+                print('加载财联社新闻：', sheet.name)
+                try:
+                    df_news = qs.news_data()  # 获取财联社新闻
+                    if not df_news.empty:
+                        if '发布时间' in df_news.columns:
+                            df_news['发布时间'] = df_news['发布时间'].apply(str)
+                        if '发布日期' in df_news.columns:
+                            df_news['发布日期'] = df_news['发布日期'].apply(str)
+
+                        if self.update_df_existing_columns(df_sht, df_news):
+                            self.update_sheet_data_only(sheet, df_sht, row_num, col_num)
+                except Exception as e:
+                    logging.error('Caught exception in Finance News Acquisition %s' % e)
+                    traceback.print_exc()
+                    continue
 
             # if '市场快讯' in sheet.name:
             #     print('加载市场快讯：', sheet.name)
@@ -275,11 +310,12 @@ class StockMonitor:
                 try:
                     df_zt = qs.stock_zt_pool()
                     if not df_zt.empty:
-                        sheet.range((1, 1), df_zt.shape).value = df_zt
+                        if self.update_df_existing_columns(df_sht, df_zt):
+                            self.update_sheet_data_only(sheet, df_sht, row_num, col_num)
                 except Exception as e:
                     logging.error('Caught exception in Market Express Acquisition %s' % e)
                     traceback.print_exc()
-                    continue
+                    # continue
 
             pass
 
