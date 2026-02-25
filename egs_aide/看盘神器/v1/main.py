@@ -69,6 +69,27 @@ class StockMonitor:
         self._wb_dict = {}
         self._refresh_wait_time = refresh_wait_time
 
+    @staticmethod
+    def update_sheet_data_only(sheet, df_sht: pd.DataFrame, row_num: int, col_num: int):
+        """
+        仅更新数据区(不重写表头)，尽量保持原有 Excel 格式不变。
+        约定第 1 行为表头，数据从第 2 行开始。
+        """
+        if df_sht is None or df_sht.empty:
+            return
+
+        data_rows_in_sheet = max(row_num - 1, 0)
+        if data_rows_in_sheet <= 0 or col_num <= 0:
+            return
+
+        write_row_num = min(data_rows_in_sheet, len(df_sht))
+        write_col_num = min(col_num, len(df_sht.columns))
+        if write_row_num <= 0 or write_col_num <= 0:
+            return
+
+        data_values = df_sht.iloc[:write_row_num, :write_col_num].values.tolist()
+        sheet.range((2, 1), (write_row_num + 1, write_col_num)).value = data_values
+
     # ========= Funcs ===========
     @staticmethod
     def get_stock_lst(df_sht: pd.DataFrame, remove_postfix: bool = False) -> list:
@@ -153,7 +174,7 @@ class StockMonitor:
                         df_sht[col] = df_tmp[col]
 
             # update to excel online
-            sheet.range((1, 1), (row_num, col_num)).value = df_sht
+            self.update_sheet_data_only(sheet, df_sht, row_num, col_num)
 
             self._wb_dict[i] = {'sheet': sheet, 'df_sht': df_sht,
                                 'row_num': row_num, 'col_num': col_num}
@@ -202,8 +223,7 @@ class StockMonitor:
                             df_sht[col] = df_rt[col].tolist()
 
                     # update to excel online
-                    # if not df_sht.empty:
-                    sheet.range((1, 1), df_sht.shape).value = df_sht
+                    self.update_sheet_data_only(sheet, df_sht, row_num, col_num)
 
             # if '概念涨幅榜' in sheet.name:
             #     print('加载概念涨幅榜数据：', sheet.name)
