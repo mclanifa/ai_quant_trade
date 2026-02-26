@@ -32,6 +32,32 @@ import logging
 
 
 class StockMonitor:
+    @staticmethod
+    def normalize_stock_code(code) -> str:
+        if pd.isna(code):
+            return ''
+
+        if isinstance(code, (int, float)):
+            if isinstance(code, float) and code.is_integer():
+                code_str = str(int(code))
+            else:
+                code_str = str(code)
+        else:
+            code_str = str(code).strip()
+
+        if not code_str or code_str.lower() in ['nan', 'none']:
+            return ''
+
+        if '.' in code_str:
+            parts = code_str.split('.')
+            if len(parts) == 2 and parts[0].isdigit() and parts[1].isalpha():
+                code_str = parts[0]
+
+        if code_str.isdigit() and len(code_str) <= 6:
+            code_str = code_str.zfill(6)
+
+        return code_str
+
     def __init__(self,
                  monitor_xlsx_file: str,
                  stock_xlsx_file: str,
@@ -61,7 +87,8 @@ class StockMonitor:
                         df_stock.rename(columns={col_name: item}, inplace=True)
                         break
 
-            self.df_stock = df_stock[self.static_properties_lst]
+            self.df_stock = df_stock[self.static_properties_lst].copy()
+            self.df_stock['证券代码'] = self.df_stock['证券代码'].apply(self.normalize_stock_code)
         else:
             self.df_stock = pd.DataFrame()
             self.use_online_data = True   # not using above info
@@ -70,11 +97,11 @@ class StockMonitor:
         self._wb_dict = {}
         self._refresh_wait_time = refresh_wait_time
         self._api_min_interval = {
-            'watchlist': 3,
-            'concept': 30,
-            'billboard': 60,
-            'news': 20,
-            'zt': 30,
+            'watchlist': 1,
+            'concept': 1,
+            'billboard': 1,
+            'news': 1,
+            'zt': 1,
         }
         self._api_next_allowed = {k: 0.0 for k in self._api_min_interval}
         self._api_fail_count = {k: 0 for k in self._api_min_interval}
@@ -200,18 +227,8 @@ class StockMonitor:
         stock_raw_lst = df_sht['代码'].tolist()
         stock_lst = []
         for code in stock_raw_lst:
-            if pd.isna(code):
-                continue
-
-            if isinstance(code, (int, float)):
-                if isinstance(code, float) and code.is_integer():
-                    code_str = str(int(code))
-                else:
-                    code_str = str(code)
-            else:
-                code_str = str(code).strip()
-
-            if not code_str or code_str.lower() in ['nan', 'none']:
+            code_str = StockMonitor.normalize_stock_code(code)
+            if not code_str:
                 continue
 
             if remove_postfix:
