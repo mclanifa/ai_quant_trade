@@ -29,6 +29,7 @@ import pandas as pd
 import qstock as qs
 
 import logging
+# import easytrader
 
 
 class StockMonitor:
@@ -105,6 +106,9 @@ class StockMonitor:
         }
         self._api_next_allowed = {k: 0.0 for k in self._api_min_interval}
         self._api_fail_count = {k: 0 for k in self._api_min_interval}
+
+        # user = easytrader.use('universal_client') # universal_client 支持多个券商，需安装对应券商的客户端并登录
+
 
     @staticmethod
     def update_sheet_data_only(sheet, df_sht: pd.DataFrame, row_num: int, col_num: int):
@@ -326,6 +330,8 @@ class StockMonitor:
 
                 # 2. 获取交易日实时盘口异动数据，相当于盯盘小精灵
                 # df_chg = qs.realtime_change()
+                # print('实时盘口异动数据：')
+                # print(df_chg)
 
                 # 使用新闻统一接口，无数据会报错
                 # df_stock_news = qs.stock_news('天瑞仪器')
