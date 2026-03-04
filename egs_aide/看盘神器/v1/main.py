@@ -73,26 +73,13 @@ class StockMonitor:
         self.sht_num = len(self.wb.sheets)
 
         # 2. open stock info xlsx file
+        self.stock_xlsx_file = stock_xlsx_file
         self.use_online_data = False   # if True, use qstock returned dataframe
-        if os.path.exists(stock_xlsx_file):
-            # todo: consider add options into args
-            df_stock = pd.read_excel(stock_xlsx_file, header=0, index_col=None)
-            # properties to be show in monitor table and only need to be load once at initialization
-            self.static_properties_lst = ['证券代码', '证券简称', '所属热门概念', '所属概念板块', '所属Wind行业名称',
-                                          '所属申万行业名称(2021)', '所属产业链板块',
-                                          '所属行政区划[行政区划级别]省级', '公司属性', '所属规模风格类型']
-            for item in self.static_properties_lst:
-                for col_name in df_stock.columns:
-                    col_name_tmp = col_name.replace('\n', '').replace(' ', '')
-                    if item in col_name_tmp:
-                        df_stock.rename(columns={col_name: item}, inplace=True)
-                        break
-
-            self.df_stock = df_stock[self.static_properties_lst].copy()
-            self.df_stock['证券代码'] = self.df_stock['证券代码'].apply(self.normalize_stock_code)
-        else:
-            self.df_stock = pd.DataFrame()
-            self.use_online_data = True   # not using above info
+        self.static_properties_lst = ['证券代码', '证券简称', '所属热门概念', '所属概念板块', '所属Wind行业名称',
+                                      '所属申万行业名称(2021)', '所属产业链板块',
+                                      '所属行政区划[行政区划级别]省级', '公司属性', '所属规模风格类型']
+        self.df_stock = pd.DataFrame()
+        self.load_stock_info_from_excel()
 
         # ===== Internal Variables =======
         self._wb_dict = {}
@@ -209,6 +196,29 @@ class StockMonitor:
     def can_request_api(self, api_name: str) -> bool:
         return time.time() >= self._api_next_allowed.get(api_name, 0.0)
 
+    def load_stock_info_from_excel(self):
+        if not os.path.exists(self.stock_xlsx_file):
+            self.df_stock = pd.DataFrame()
+            self.use_online_data = True
+            return
+
+        try:
+            df_stock = pd.read_excel(self.stock_xlsx_file, header=0, index_col=None)
+            for item in self.static_properties_lst:
+                for col_name in df_stock.columns:
+                    col_name_tmp = col_name.replace('\n', '').replace(' ', '')
+                    if item in col_name_tmp:
+                        df_stock.rename(columns={col_name: item}, inplace=True)
+                        break
+
+            self.df_stock = df_stock[self.static_properties_lst].copy()
+            self.df_stock['证券代码'] = self.df_stock['证券代码'].apply(self.normalize_stock_code)
+            self.use_online_data = False
+        except Exception as e:
+            logging.error('读取个股信息Excel失败: %s', e)
+            self.df_stock = pd.DataFrame()
+            self.use_online_data = True
+
     def mark_api_result(self, api_name: str, success: bool):
         now = time.time()
         min_interval = self._api_min_interval.get(api_name, 5)
@@ -305,8 +315,12 @@ class StockMonitor:
                                 'row_num': row_num, 'col_num': col_num}
 
     def query_rt_info(self):
-        for val in self._wb_dict.values():
-            sheet, df_sht, row_num, col_num = val.values()
+        self.load_stock_info_from_excel()
+
+        for i in range(self.sht_num):
+            sheet, df_sht, row_num, col_num = self.sheet_2_df(i)
+            if df_sht.empty:
+                continue
 
             if '自选股' in sheet.name:
                 if not self.can_request_api('watchlist'):
